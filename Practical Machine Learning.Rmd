@@ -1,0 +1,121 @@
+---
+title: "Practical Machine Learning Project"
+author: "Gary Martin"
+date: "July 17, 2016"
+output: html_document
+---
+
+## Synopsis
+This markdown file outlines the process for selecting and building the optimal model on 20 test cases from the data "Weight Lifting Exercises Dataset" available at http://groupware.les.inf.puc-rio.br/har
+
+## Data Processing
+### Reading Data
+1\. Read the Training and Test data sources from the links provided
+
+```{r readdata, cache=TRUE}
+## Download and read raw data
+url1 <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+download.file(url1, destfile="pml-training.csv")
+url2 <- "http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(url2, destfile="pml-testing.csv")
+Train <- read.csv("pml-training.csv", header=TRUE)
+Test <- read.csv("pml-testing.csv", header=TRUE)
+str(Train)
+```
+
+Exploratory analysis are performed on the `Train` set only, not on the `Test` set.It is determined that there are 19622 observations, consisting of 160 variables.  
+
+### Normalizing and Selecting Data
+Quite a few variables in the data set contain values such as NA or are missing data. An example of such a varible is called out below. We will be excluding these variables from our model due to the lack of valid measurements. 
+
+
+```{r exploredata, cache=TRUE}
+summary(Train$var_total_accel_belt)
+```
+
+This reduces the number of variables to 54, including our prediction variable `classe`.
+
+```{r processdata, cache=TRUE}
+Tidy <- Train[,-c(grep("^amplitude|^kurtosis|^skewness|^avg|^cvtd_timestamp|^max|^min|^new_window|^raw_timestamp|^stddev|^var|^user_name|X",names(Train)))]
+
+paste("Complete Cases:")
+table(complete.cases(Tidy))
+```
+
+The data is further segregated into two sets, 60% for the training set and 40% for the test set. Also we set the seed for reproducability.
+
+
+```{r splitdata, cache=TRUE}
+library(caret)
+set.seed(22)
+inTrain <- createDataPartition(y=Tidy$classe,
+                               p=0.6,list=FALSE)
+TidyTrain <- Tidy[inTrain,]
+TidyTest <- Tidy[-inTrain,]
+```
+
+## Model Selection
+### Model Comparison
+We will be using the random forest and gradient boosting algorithms for comparison because these two models are the recommended and most accurate for our purposes.We use Kappa as the comparison criteria, and reduce the risk of overfitting by using a 10-fold cross validation.    
+
+
+```{r comparemodel, cache=TRUE}
+set.seed(22)
+# k-fold validation - 10-fold validation, use kappa as metric
+fitControl <- trainControl(method = "cv", number = 10)
+gbmFit <- train(classe~., data=TidyTrain, method="gbm", metric="Kappa", trControl=fitControl)
+rfFit <- train(classe~., data=TidyTrain, method="rf", metric="Kappa", trControl=fitControl)
+```
+
+
+
+### Model Selection
+The models are compared using the `resamples` function from the Caret package.Based on the plot below, it can be determined that the RandomForest algorithm fares better than the Gradient Boosting algorithm for this dataset (Kappa mean value = 0.996). It can also be seen that the RandomForest algorithm also displays less spread than Gradient Boosting.
+
+```{r modelplot}
+library(caret)
+library(lattice)
+rValues <- resamples(list(rf=rfFit,gbm=gbmFit))
+summary(rValues)
+bwplot(rValues,metric="Kappa",main="RandomForest (rf) vs Gradient Boosting (gbm)")
+```
+
+
+## Model Validation
+
+```{r selectedmodel}
+rfFit
+```
+
+We employ the `confusionMatrix` function in the Caret package to validate the selected model with the `TidyTest` test set. displaying the relevent statistics and error rates.   
+
+```{r validatemodel}
+library(caret)
+confusionMatrix(TidyTest$classe, predict(rfFit,TidyTest))
+```
+
+The selected Model performs at a Kappa value of 0.995, with an accuracy of 0.996. Thats pretty good.
+
+## Final Model Testing
+We use the selected model to predict the classification of the testing set provided and use the `pml_write_files` function is to generate submission files.
+
+```{r test}
+library(caret)
+results <- predict(rfFit,newdata=Test)
+print(as.data.frame(results))
+```
+
+```{r submitcode,echo=FALSE}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+```
+
+```{r submitexecute}
+pml_write_files(results)
+```
+
